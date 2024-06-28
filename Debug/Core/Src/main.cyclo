@@ -1,0 +1,17 @@
+../Core/Src/main.c:126:6:motor_control	1
+../Core/Src/main.c:138:6:HAL_TIM_IC_CaptureCallback	18
+../Core/Src/main.c:218:6:acces_measure	2
+../Core/Src/main.c:235:6:motor_limit	9
+../Core/Src/main.c:263:6:motor_compare	1
+../Core/Src/main.c:271:6:pid_control	1
+../Core/Src/main.c:311:5:main	1
+../Core/Src/main.c:405:6:SystemClock_Config	3
+../Core/Src/main.c:451:13:MX_SPI1_Init	2
+../Core/Src/main.c:489:13:MX_TIM1_Init	9
+../Core/Src/main.c:560:13:MX_TIM2_Init	7
+../Core/Src/main.c:621:13:MX_USART1_UART_Init	2
+../Core/Src/main.c:654:13:MX_USART3_UART_Init	2
+../Core/Src/main.c:687:13:MX_GPIO_Init	1
+../Core/Src/main.c:744:6:HAL_GPIO_EXTI_Callback	1
+../Core/Src/main.c:760:10:degree_change_percentage	1
+../Core/Src/main.c:770:6:Error_Handler	1

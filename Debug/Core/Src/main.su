@@ -1,0 +1,17 @@
+../Core/Src/main.c:126:6:motor_control	4	static
+../Core/Src/main.c:138:6:HAL_TIM_IC_CaptureCallback	16	static
+../Core/Src/main.c:218:6:acces_measure	32	static
+../Core/Src/main.c:235:6:motor_limit	4	static
+../Core/Src/main.c:263:6:motor_compare	4	static
+../Core/Src/main.c:271:6:pid_control	16	static
+../Core/Src/main.c:311:5:main	16	static
+../Core/Src/main.c:405:6:SystemClock_Config	88	static
+../Core/Src/main.c:451:13:MX_SPI1_Init	8	static
+../Core/Src/main.c:489:13:MX_TIM1_Init	48	static
+../Core/Src/main.c:560:13:MX_TIM2_Init	48	static
+../Core/Src/main.c:621:13:MX_USART1_UART_Init	8	static
+../Core/Src/main.c:654:13:MX_USART3_UART_Init	8	static
+../Core/Src/main.c:687:13:MX_GPIO_Init	48	static
+../Core/Src/main.c:744:6:HAL_GPIO_EXTI_Callback	16	static
+../Core/Src/main.c:760:10:degree_change_percentage	16	static
+../Core/Src/main.c:770:6:Error_Handler	4	static
