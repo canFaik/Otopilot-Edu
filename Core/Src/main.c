@@ -29,7 +29,13 @@
 
 /* Private typedef -----------------------------------------------------------*/
 /* USER CODE BEGIN PTD */
+typedef struct motor_speed {
+	volatile uint32_t motor_speed[4];
+}motor_throttle;
 
+motor_throttle loiter_mode;
+motor_throttle stabilize_mode;
+motor_throttle motor_pid_output;
 /* USER CODE END PTD */
 
 /* Private define ------------------------------------------------------------*/
@@ -63,30 +69,20 @@ char tx_buf[64];
 float output_roll = 0;
 float output_pitch = 0;
 
-uint16_t motor_1_throttle = 0;
-uint16_t motor_2_throttle = 0;
-uint16_t motor_3_throttle = 0;
-uint16_t motor_4_throttle = 0;
-
-
 volatile uint32_t ch1_rising = 0, ch2_rising = 0, ch3_rising = 0, ch4_rising = 0;
 volatile uint32_t ch1_falling = 0, ch2_falling = 0, ch3_falling = 0, ch4_falling = 0;
 volatile uint32_t pre_ch1 = 0, ch1 = 0, pre_ch2 = 0, ch2 = 0, pre_ch3 = 0, ch3 = 0, pre_ch4 = 0, ch4 = 0;
 
-// PID parametreleri
 float kp = 1.0;
 float ki =	0.1;
 float kd =0.01;
 
-// PID değişkenleri
 float error_roll = 0, error_pitch = 0;
 float last_error_roll = 0, last_error_pitch = 0;
 float integral_roll = 0, integral_pitch = 0;
 
-// Motor hızları
 int motor_speeds[4] = {0, 0, 0, 0};
 
-// İstenen açılar
 float desired_roll = 0, desired_pitch = 0;
 
 float measured_roll, measured_pitch;
@@ -101,6 +97,7 @@ uint16_t degree_change_percentage(uint16_t In, uint16_t Inmin, uint16_t Inmax, u
 
 uint8_t drdyFlag=0;
 
+uint16_t rec_roll, roll_right,roll_left,pitch_forward,pitch_back,yaw_right,yaw_left,rec_pitch,rec_yaw,rec_throttle;
 
 double xAngle = 0;
 /* USER CODE END PV */
@@ -120,41 +117,38 @@ static void MX_TIM2_Init(void);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+void tim_start(void);
 
+void motor_compare_pid(void);
 
+void drone_motor_output_pid(void);
 
-void motor_control(void)
-{
-	motor_1_throttle =1000;
-	__HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_1,motor_1_throttle);
-	__HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_1,motor_2_throttle);
-	__HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_1,motor_3_throttle);
-	__HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_1,motor_4_throttle);
-}
+void stabilize_drone_mode(void);
 
+void stabilize_motor_output(void);
 
-
-
+void motor_value_control(void);
 void HAL_TIM_IC_CaptureCallback(TIM_HandleTypeDef *htim)
 {
-	if(htim->Instance == TIM1)  // interrupt TIM1 biriminden geliyorsa gir
+	if(htim->Instance == TIM1)
 	{
-		switch(htim->Channel) // aktif kanal hangisiyse, o kanalın case'ine git
+		switch(htim->Channel)
 		{
 		case HAL_TIM_ACTIVE_CHANNEL_1:
-			if((TIM1->CCER & TIM_CCER_CC1P)==0) // kanalin aktif olmasi kesmenin oradan gelecegi anlamina gelmez/gpio pinini kontrol et
+			if((TIM1->CCER & TIM_CCER_CC1P)==0)
 			{
-				ch1_rising = TIM1->CCR1; // yukselen kenar degerini kaydet
-				TIM1->CCER |= TIM_CCER_CC1P; // polariteyi düsen kenar olarak degistir
+				ch1_rising = TIM1->CCR1;
+				TIM1->CCER |= TIM_CCER_CC1P;
 			}
 
 			else
 			{
 				ch1_falling = TIM1->CCR1;
-				pre_ch1 = ch1_falling - ch1_rising; // dusen kenar degerini kaydet ve yukselen kenar degerinden cikar
-				if(pre_ch1 < 0)pre_ch1 += 0xFFFF;// eger sonuc negatifse taban tumleme yap
-				if(pre_ch1 < 2010 && pre_ch1 > 990)ch1=pre_ch1;
-				TIM1->CCER &= ~TIM_CCER_CC1P; // polariteyi yukselen kenar olarak ayarla
+				pre_ch1 = ch1_falling - ch1_rising;
+				//if(pre_ch1 < 0)pre_ch1 += 0xFFFF;
+				pre_ch1 = degree_change_percentage(pre_ch1, 2140, 3862, 0,1000);
+				if(pre_ch1 <= 1000 && pre_ch1 >= 0)rec_roll=pre_ch1;
+				TIM1->CCER &= ~TIM_CCER_CC1P;
 
 				/*
 				 * ch1_rising 65000
@@ -175,7 +169,8 @@ void HAL_TIM_IC_CaptureCallback(TIM_HandleTypeDef *htim)
 				ch2_falling = TIM1->CCR2;
 				pre_ch2 = ch2_falling - ch2_rising;
 				if(pre_ch2 < 0)pre_ch2 += 0xFFFF;
-				if(pre_ch2 < 2010 && pre_ch2 > 990)ch2=pre_ch2;
+				pre_ch2 = degree_change_percentage(pre_ch2, 2140, 3862, 0, 1000);
+				if(pre_ch2 <= 1000 && pre_ch2 >= 0)rec_pitch=pre_ch2;
 				TIM1->CCER &= ~TIM_CCER_CC2P;
 			}
 			break;
@@ -190,7 +185,8 @@ void HAL_TIM_IC_CaptureCallback(TIM_HandleTypeDef *htim)
 				ch3_falling = TIM1->CCR3;
 				pre_ch3 = ch3_falling - ch3_rising;
 				if(pre_ch3 < 0)pre_ch3 += 0xFFFF;
-				if(pre_ch3 < 2010 && pre_ch3 > 990)ch3=pre_ch3;
+				pre_ch3 = degree_change_percentage(pre_ch3, 2140, 3862, 0, 1000);
+				if(pre_ch3 <= 1000 && pre_ch3 >= 0)rec_throttle=pre_ch3;
 				TIM1->CCER &= ~TIM_CCER_CC3P;
 			}
 			break;
@@ -205,7 +201,8 @@ void HAL_TIM_IC_CaptureCallback(TIM_HandleTypeDef *htim)
 				ch4_falling = TIM1->CCR4;
 				pre_ch4 = ch4_falling - ch4_rising;
 				if(pre_ch4 < 0)pre_ch4 += 0xFFFF;
-				if(pre_ch4 < 2010 && pre_ch4 > 990)ch4=pre_ch4;
+				pre_ch4 = degree_change_percentage(pre_ch4, 2140, 3862, 0, 1000);
+				if(pre_ch4 <= 1000 && pre_ch4 >= 0)rec_yaw=pre_ch4;
 				TIM1->CCER &= ~TIM_CCER_CC4P;
 			}
 			break;
@@ -225,47 +222,21 @@ void acces_measure(void)
 		Y = LIS3DSH_GetDataScaledY();
 		Z = LIS3DSH_GetDataScaledZ();
 
-
-
 		measured_roll = (int)((((atan2((double)(-X.x) , sqrt((double)Y.y *(double) Y.y +(double) Z.z *(double) Z.z)) * 57.3)+1.5))* -1);
 	}
 		measured_pitch =(int)((atan2(Y.y, Z.z) * 180 / 3.14)+1.2);
 }
 
-void motor_limit(void)
+
+
+void motor_compare_pid(void)
 {
-    if(motor_speeds[1] <=1155 )
-    	 motor_speeds[1] = 1155;
+	if(motor_pid_output.motor_speed[0] >=2000 ) motor_pid_output.motor_speed[0] = 2000;
+	__HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_1,motor_pid_output.motor_speed[0]);
 
-    if(motor_speeds[2] <=1155 )
-    	 motor_speeds[2] = 1155;
-
-    if(motor_speeds[3] <=1155 )
-    	 motor_speeds[3] = 1155;
-
-    if(motor_speeds[0] <=1155 )
-    	 motor_speeds[0] = 1155;
-
-
-    if(motor_speeds[0] >2200 )
-    	 motor_speeds[0] = 2200;
-
-    if(motor_speeds[1] >=2200 )
-    	 motor_speeds[1] = 2200;
-
-    if(motor_speeds[2] >=2200 )
-    	 motor_speeds[2] = 2200;
-
-    if(motor_speeds[3] >=2200)
-    	 motor_speeds[3] = 2200;
-}
-
-void motor_compare(void)
-{
-	__HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_1,motor_speeds[0]);
-	__HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_2,motor_speeds[1]);
-	__HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_3,motor_speeds[2]);
-	__HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_4,motor_speeds[3]);
+	__HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_2,motor_pid_output.motor_speed[1]);
+	__HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_3,motor_pid_output.motor_speed[2]);
+	__HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_4,motor_pid_output.motor_speed[3]);
 }
 
 void pid_control(float measured_roll, float measured_pitch) {
@@ -275,6 +246,7 @@ void pid_control(float measured_roll, float measured_pitch) {
     integral_roll += error_roll;
 
      output_roll = kp * error_roll + ki * integral_roll + kd * (error_roll - last_error_roll);
+     output_roll /= 800;
 
     last_error_roll = error_roll;
 
@@ -283,21 +255,8 @@ void pid_control(float measured_roll, float measured_pitch) {
     integral_pitch += error_pitch;
 
     output_pitch = kp * error_pitch + ki * integral_pitch + kd * (error_pitch - last_error_pitch);
+    output_pitch /= 800;
     last_error_pitch = error_pitch;
-
-
-
-
-    // Motor hızlarını ayarlama
-    motor_speeds[0] = 1200 + output_roll + output_pitch;  // Motor 1
-    motor_speeds[1] = 1200 - output_roll - output_pitch;  // Motor 3
-    motor_speeds[2] = 1200 - output_roll + output_pitch;  // Motor 2
-    motor_speeds[3] = 1200 + output_roll - output_pitch;  // Motor 4
-
-  /// motor_limit();
-
-    motor_compare();
-
 
 }
 
@@ -350,23 +309,18 @@ int main(void)
   LIS3DSH_Y_calibrate(-1020.0, 1040.0);
   LIS3DSH_Z_calibrate(-920.0, 1040.0);
 
-  /* HAL PWM STAR */
+  /* HAL PWM START */
   HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_1);
   HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_2);
   HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_3);
   HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_4);
 
+  __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_1,1000);
+  __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_2,1000);
+  __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_3,1000);
+  __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_4,1000);
 
-
-
-
-	motor_1_throttle =1000;
-	__HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_1,motor_1_throttle);
-	__HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_2,motor_1_throttle);
-	__HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_3,motor_1_throttle);
-	__HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_4,motor_1_throttle);
-
-
+  HAL_Delay(3000);
 
   /* USER CODE END 2 */
 
@@ -378,21 +332,24 @@ int main(void)
 
     /* USER CODE BEGIN 3 */
 
+	  // Timer start htim1, input capture mode.
+	  tim_start();
+
+	  // Roll and pitch angle measure
+	  acces_measure();
+
+	  // Roll and pitch  pid control
+	  pid_control(measured_roll, measured_pitch);
+
+	  // Motors output pid value
+/* 		drone_motor_output_pid(); */
+	  stabilize_drone_mode();
+	  // Motor output compare
+/* 		motor_compare_pid();	 */
+
+	  stabilize_motor_output();
 
 
-	   HAL_TIM_IC_Start_IT(&htim1, TIM_CHANNEL_1); // TIMX->DIER, CCXIE bitini aktif eder.
-	   HAL_TIM_IC_Start_IT(&htim1, TIM_CHANNEL_2);
-	   HAL_TIM_IC_Start_IT(&htim1, TIM_CHANNEL_3);
-	   HAL_TIM_IC_Start_IT(&htim1, TIM_CHANNEL_4);
-
-
-	  	acces_measure();
-		pid_control(measured_roll, measured_pitch);
-
-
-
-
-HAL_Delay(200);
 
   }
   /* USER CODE END 3 */
@@ -501,7 +458,7 @@ static void MX_TIM1_Init(void)
 
   /* USER CODE END TIM1_Init 1 */
   htim1.Instance = TIM1;
-  htim1.Init.Prescaler = 41;
+  htim1.Init.Prescaler = 83;
   htim1.Init.CounterMode = TIM_COUNTERMODE_UP;
   htim1.Init.Period = 0xFFFF;
   htim1.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
@@ -526,7 +483,7 @@ static void MX_TIM1_Init(void)
   {
     Error_Handler();
   }
-  sConfigIC.ICPolarity = TIM_INPUTCHANNELPOLARITY_RISING;
+  sConfigIC.ICPolarity = TIM_INPUTCHANNELPOLARITY_BOTHEDGE;
   sConfigIC.ICSelection = TIM_ICSELECTION_DIRECTTI;
   sConfigIC.ICPrescaler = TIM_ICPSC_DIV1;
   sConfigIC.ICFilter = 0;
@@ -534,6 +491,7 @@ static void MX_TIM1_Init(void)
   {
     Error_Handler();
   }
+  sConfigIC.ICPolarity = TIM_INPUTCHANNELPOLARITY_RISING;
   if (HAL_TIM_IC_ConfigChannel(&htim1, &sConfigIC, TIM_CHANNEL_2) != HAL_OK)
   {
     Error_Handler();
@@ -751,16 +709,88 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 
 	drdyFlag = 1;
 	HAL_GPIO_TogglePin(GPIOD, GPIO_PIN_13);
-}
+};
 
-
+void drone_motor_output_pid(void)
+{
+    motor_pid_output.motor_speed[0] = 1200 + output_roll + output_pitch;
+    motor_pid_output.motor_speed[1] = 1200 - output_roll - output_pitch;
+    motor_pid_output.motor_speed[2] = 1200 - output_roll + output_pitch;
+    motor_pid_output.motor_speed[3] = 1200 + output_roll - output_pitch;
+};
 
 
 
 uint16_t degree_change_percentage(uint16_t In, uint16_t Inmin, uint16_t Inmax, uint16_t Outmin, uint16_t Outmax)
 {
 	return (In- Inmin) * (Outmax- Outmin) / (Inmax -Inmin) + Outmin;
+};
+
+void tim_start(void)
+{
+	   HAL_TIM_IC_Start_IT(&htim1, TIM_CHANNEL_1);
+	   HAL_TIM_IC_Start_IT(&htim1, TIM_CHANNEL_2);
+	   HAL_TIM_IC_Start_IT(&htim1, TIM_CHANNEL_3);
+	   HAL_TIM_IC_Start_IT(&htim1, TIM_CHANNEL_4);
+};
+
+void stabilize_drone_mode(void)
+{
+	motor_value_control();
+	stabilize_mode.motor_speed[0] = 1000 + rec_throttle + roll_right - roll_left + pitch_back - pitch_forward + yaw_right - yaw_left;
+	stabilize_mode.motor_speed[1] = 1000 + rec_throttle + roll_right - roll_left - pitch_back + pitch_forward + yaw_left - yaw_right;
+	stabilize_mode.motor_speed[2] = 1000 + rec_throttle + roll_left - roll_right - pitch_back + pitch_forward + yaw_right - yaw_left;
+	stabilize_mode.motor_speed[3] = 1000 + rec_throttle + roll_left - roll_right + pitch_back - pitch_forward + yaw_left - yaw_right;
+
+
+	if(stabilize_mode.motor_speed[0] >=2000 ) stabilize_mode.motor_speed[0] = 2000;
+	if(stabilize_mode.motor_speed[1] >=2000 ) stabilize_mode.motor_speed[1] = 2000;
+	if(stabilize_mode.motor_speed[2] >=2000 ) stabilize_mode.motor_speed[2] = 2000;
+	if(stabilize_mode.motor_speed[3] >=2000 ) stabilize_mode.motor_speed[3] = 2000;
+
+	if(stabilize_mode.motor_speed[0] <=1000 ) stabilize_mode.motor_speed[0] = 1000;
+	if(stabilize_mode.motor_speed[1] <=1000 ) stabilize_mode.motor_speed[1] = 1000;
+	if(stabilize_mode.motor_speed[2] <=1000 ) stabilize_mode.motor_speed[2] = 1000;
+	if(stabilize_mode.motor_speed[3] <=1000 ) stabilize_mode.motor_speed[3] = 1000;
+
+	stabilize_motor_output();
+
+};
+
+void stabilize_motor_output(void)
+{
+
+
+
+	__HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_1,stabilize_mode.motor_speed[0]);
+	__HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_2,stabilize_mode.motor_speed[1]);
+	__HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_3,stabilize_mode.motor_speed[2]);
+	__HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_4,stabilize_mode.motor_speed[3]);
+};
+
+uint16_t receiver_value_change(uint16_t channel, uint16_t min_value, uint16_t max_value, uint16_t min_per_value, uint16_t max_per_value)
+{
+
+	return degree_change_percentage(channel, min_value, max_value, min_per_value, max_per_value);
+
 }
+
+void motor_value_control(void)
+{
+	roll_right = degree_change_percentage(rec_roll, 500, 1000, 0, 500);
+	if(roll_right >=1050) roll_right = 0;
+	roll_left = degree_change_percentage(rec_roll, 0, 500, 500, 0);
+	if(roll_left >=1050) roll_left = 0;
+	yaw_right = degree_change_percentage(rec_yaw, 500, 1000, 0, 500);
+	if(yaw_right >= 1050) yaw_right = 0;
+	yaw_left = degree_change_percentage(rec_yaw, 0, 500, 500, 0);
+	if(yaw_left >= 1050) yaw_left = 0;
+	pitch_forward = degree_change_percentage(rec_pitch,0 , 500, 500, 0);
+	if(pitch_forward >= 1050) pitch_forward = 0;
+	pitch_back = degree_change_percentage(rec_pitch,500 , 1000, 0, 500);
+	if(pitch_back >= 1050) pitch_back = 0;
+}
+
 /* USER CODE END 4 */
 
 /**
@@ -775,7 +805,7 @@ void Error_Handler(void)
   {
   }
   /* USER CODE END Error_Handler_Debug */
-}
+};
 
 #ifdef  USE_FULL_ASSERT
 /**
