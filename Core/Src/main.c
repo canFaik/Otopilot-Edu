@@ -53,6 +53,7 @@ SPI_HandleTypeDef hspi1;
 
 TIM_HandleTypeDef htim1;
 TIM_HandleTypeDef htim2;
+TIM_HandleTypeDef htim3;
 
 UART_HandleTypeDef huart1;
 UART_HandleTypeDef huart3;
@@ -66,8 +67,8 @@ double roll = 0;
 double pitch=0;
 char tx_buf[64];
 
-float output_roll = 0;
-float output_pitch = 0;
+float pid_roll_value = 0;
+float pid_pitch_value = 0;
 
 volatile uint32_t ch1_rising = 0, ch2_rising = 0, ch3_rising = 0, ch4_rising = 0;
 volatile uint32_t ch1_falling = 0, ch2_falling = 0, ch3_falling = 0, ch4_falling = 0;
@@ -110,6 +111,7 @@ static void MX_TIM1_Init(void);
 static void MX_USART1_UART_Init(void);
 static void MX_USART3_UART_Init(void);
 static void MX_TIM2_Init(void);
+static void MX_TIM3_Init(void);
 /* USER CODE BEGIN PFP */
 /* Private function prototypes -----------------------------------------------*/
 
@@ -119,147 +121,21 @@ static void MX_TIM2_Init(void);
 /* USER CODE BEGIN 0 */
 void tim_start(void);
 
-void motor_compare_pid(void);
+void acces_measure(void);
 
-void drone_motor_output_pid(void);
+void loiter_drone_mode(void);
 
 void stabilize_drone_mode(void);
 
 void stabilize_motor_output(void);
 
-void motor_value_control(void);
-void HAL_TIM_IC_CaptureCallback(TIM_HandleTypeDef *htim)
-{
-	if(htim->Instance == TIM1)
-	{
-		switch(htim->Channel)
-		{
-		case HAL_TIM_ACTIVE_CHANNEL_1:
-			if((TIM1->CCER & TIM_CCER_CC1P)==0)
-			{
-				ch1_rising = TIM1->CCR1;
-				TIM1->CCER |= TIM_CCER_CC1P;
-			}
+void receiver_motor_value(void);
 
-			else
-			{
-				ch1_falling = TIM1->CCR1;
-				pre_ch1 = ch1_falling - ch1_rising;
-				//if(pre_ch1 < 0)pre_ch1 += 0xFFFF;
-				pre_ch1 = degree_change_percentage(pre_ch1, 2140, 3862, 0,1000);
-				if(pre_ch1 <= 1000 && pre_ch1 >= 0)rec_roll=pre_ch1;
-				TIM1->CCER &= ~TIM_CCER_CC1P;
+void pid_rol_pitch_value(float measured_roll, float measured_pitch);
 
-				/*
-				 * ch1_rising 65000
-				 * ch1 falling 570
-				 * pre_ch1 = pre_ch1 falling - pre_ch1_rising = 570 - 65000 = -64430
-				 * pre_ch1 +=0xFFFF(65536) --> 1106
-				 */
-			}
-			break;
-		case HAL_TIM_ACTIVE_CHANNEL_2:
-			if((TIM1->CCER & TIM_CCER_CC2P)==0)
-			{
-				ch2_rising = TIM1->CCR2;
-				TIM1->CCER |= TIM_CCER_CC2P;
-			}
-			else
-			{
-				ch2_falling = TIM1->CCR2;
-				pre_ch2 = ch2_falling - ch2_rising;
-				if(pre_ch2 < 0)pre_ch2 += 0xFFFF;
-				pre_ch2 = degree_change_percentage(pre_ch2, 2140, 3862, 0, 1000);
-				if(pre_ch2 <= 1000 && pre_ch2 >= 0)rec_pitch=pre_ch2;
-				TIM1->CCER &= ~TIM_CCER_CC2P;
-			}
-			break;
-		case HAL_TIM_ACTIVE_CHANNEL_3:
-			if((TIM1->CCER & TIM_CCER_CC3P)==0)
-			{
-				ch3_rising = TIM1->CCR3;
-				TIM1->CCER |= TIM_CCER_CC3P;
-			}
-			else
-			{
-				ch3_falling = TIM1->CCR3;
-				pre_ch3 = ch3_falling - ch3_rising;
-				if(pre_ch3 < 0)pre_ch3 += 0xFFFF;
-				pre_ch3 = degree_change_percentage(pre_ch3, 2140, 3862, 0, 1000);
-				if(pre_ch3 <= 1000 && pre_ch3 >= 0)rec_throttle=pre_ch3;
-				TIM1->CCER &= ~TIM_CCER_CC3P;
-			}
-			break;
-		case HAL_TIM_ACTIVE_CHANNEL_4:
-			if((TIM1->CCER & TIM_CCER_CC4P)==0)
-			{
-				ch4_rising = TIM1->CCR4;
-				TIM1->CCER |= TIM_CCER_CC4P;
-			}
-			else
-			{
-				ch4_falling = TIM1->CCR4;
-				pre_ch4 = ch4_falling - ch4_rising;
-				if(pre_ch4 < 0)pre_ch4 += 0xFFFF;
-				pre_ch4 = degree_change_percentage(pre_ch4, 2140, 3862, 0, 1000);
-				if(pre_ch4 <= 1000 && pre_ch4 >= 0)rec_yaw=pre_ch4;
-				TIM1->CCER &= ~TIM_CCER_CC4P;
-			}
-			break;
-		default:
-			break;
-		}
-	}
-}
+void loiter_motor_output(void);
 
-void acces_measure(void)
-{
-	if(drdyFlag == 1)
-	{
-
-		drdyFlag = 0;
-		X = LIS3DSH_GetDataScaled();
-		Y = LIS3DSH_GetDataScaledY();
-		Z = LIS3DSH_GetDataScaledZ();
-
-		measured_roll = (int)((((atan2((double)(-X.x) , sqrt((double)Y.y *(double) Y.y +(double) Z.z *(double) Z.z)) * 57.3)+1.5))* -1);
-	}
-		measured_pitch =(int)((atan2(Y.y, Z.z) * 180 / 3.14)+1.2);
-}
-
-
-
-void motor_compare_pid(void)
-{
-	if(motor_pid_output.motor_speed[0] >=2000 ) motor_pid_output.motor_speed[0] = 2000;
-	__HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_1,motor_pid_output.motor_speed[0]);
-
-	__HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_2,motor_pid_output.motor_speed[1]);
-	__HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_3,motor_pid_output.motor_speed[2]);
-	__HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_4,motor_pid_output.motor_speed[3]);
-}
-
-void pid_control(float measured_roll, float measured_pitch) {
-    // Roll PID calculate
-
-    error_roll = desired_roll - measured_roll;
-    integral_roll += error_roll;
-
-     output_roll = kp * error_roll + ki * integral_roll + kd * (error_roll - last_error_roll);
-     output_roll /= 800;
-
-    last_error_roll = error_roll;
-
-    // Pitch PID calculate
-    error_pitch = desired_pitch - measured_pitch;
-    integral_pitch += error_pitch;
-
-    output_pitch = kp * error_pitch + ki * integral_pitch + kd * (error_pitch - last_error_pitch);
-    output_pitch /= 800;
-    last_error_pitch = error_pitch;
-
-}
-
+void HAL_TIM_IC_CaptureCallback(TIM_HandleTypeDef *htim);
 
 /* USER CODE END 0 */
 
@@ -296,6 +172,7 @@ int main(void)
   MX_USART1_UART_Init();
   MX_USART3_UART_Init();
   MX_TIM2_Init();
+  MX_TIM3_Init();
   /* USER CODE BEGIN 2 */
   HAL_TIM_Base_Start(&htim1);
   myAccConfigDef.dataRate = LIS3DSH_DATARATE_25;
@@ -332,23 +209,12 @@ int main(void)
 
     /* USER CODE BEGIN 3 */
 
-	  // Timer start htim1, input capture mode.
-	  tim_start();
 
-	  // Roll and pitch angle measure
-	  acces_measure();
+	  tim_start(); 											/* Timer start htim1, input capture */
 
-	  // Roll and pitch  pid control
-	  pid_control(measured_roll, measured_pitch);
+	  stabilize_drone_mode();								/* Drone is stabilize mode active */
 
-	  // Motors output pid value
-/* 		drone_motor_output_pid(); */
-	  stabilize_drone_mode();
-	  // Motor output compare
-/* 		motor_compare_pid();	 */
-
-	  stabilize_motor_output();
-
+	  loiter_drone_mode();									/* Drone is loiter mode active */
 
 
   }
@@ -572,6 +438,64 @@ static void MX_TIM2_Init(void)
 }
 
 /**
+  * @brief TIM3 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_TIM3_Init(void)
+{
+
+  /* USER CODE BEGIN TIM3_Init 0 */
+
+  /* USER CODE END TIM3_Init 0 */
+
+  TIM_ClockConfigTypeDef sClockSourceConfig = {0};
+  TIM_MasterConfigTypeDef sMasterConfig = {0};
+  TIM_IC_InitTypeDef sConfigIC = {0};
+
+  /* USER CODE BEGIN TIM3_Init 1 */
+
+  /* USER CODE END TIM3_Init 1 */
+  htim3.Instance = TIM3;
+  htim3.Init.Prescaler = 83;
+  htim3.Init.CounterMode = TIM_COUNTERMODE_UP;
+  htim3.Init.Period = 0xFFFF;
+  htim3.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
+  htim3.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
+  if (HAL_TIM_Base_Init(&htim3) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sClockSourceConfig.ClockSource = TIM_CLOCKSOURCE_INTERNAL;
+  if (HAL_TIM_ConfigClockSource(&htim3, &sClockSourceConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  if (HAL_TIM_IC_Init(&htim3) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
+  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
+  if (HAL_TIMEx_MasterConfigSynchronization(&htim3, &sMasterConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sConfigIC.ICPolarity = TIM_INPUTCHANNELPOLARITY_BOTHEDGE;
+  sConfigIC.ICSelection = TIM_ICSELECTION_DIRECTTI;
+  sConfigIC.ICPrescaler = TIM_ICPSC_DIV1;
+  sConfigIC.ICFilter = 0;
+  if (HAL_TIM_IC_ConfigChannel(&htim3, &sConfigIC, TIM_CHANNEL_1) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN TIM3_Init 2 */
+
+  /* USER CODE END TIM3_Init 2 */
+
+}
+
+/**
   * @brief USART1 Initialization Function
   * @param None
   * @retval None
@@ -654,6 +578,7 @@ static void MX_GPIO_Init(void)
   __HAL_RCC_GPIOA_CLK_ENABLE();
   __HAL_RCC_GPIOB_CLK_ENABLE();
   __HAL_RCC_GPIOD_CLK_ENABLE();
+  __HAL_RCC_GPIOC_CLK_ENABLE();
 
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(GPIOE, GPIO_PIN_3, GPIO_PIN_RESET);
@@ -701,48 +626,26 @@ static void MX_GPIO_Init(void)
 /* USER CODE BEGIN 4 */
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 {
-  /* Prevent unused argument(s) compilation warning */
-  UNUSED(GPIO_Pin);
-  /* NOTE: This function Should not be modified, when the callback is needed,
-           the HAL_GPIO_EXTI_Callback could be implemented in the user file
-   */
+
+	UNUSED(GPIO_Pin);
 
 	drdyFlag = 1;
 	HAL_GPIO_TogglePin(GPIOD, GPIO_PIN_13);
-};
-
-void drone_motor_output_pid(void)
-{
-    motor_pid_output.motor_speed[0] = 1200 + output_roll + output_pitch;
-    motor_pid_output.motor_speed[1] = 1200 - output_roll - output_pitch;
-    motor_pid_output.motor_speed[2] = 1200 - output_roll + output_pitch;
-    motor_pid_output.motor_speed[3] = 1200 + output_roll - output_pitch;
-};
-
-
-
-uint16_t degree_change_percentage(uint16_t In, uint16_t Inmin, uint16_t Inmax, uint16_t Outmin, uint16_t Outmax)
-{
-	return (In- Inmin) * (Outmax- Outmin) / (Inmax -Inmin) + Outmin;
-};
-
-void tim_start(void)
-{
-	   HAL_TIM_IC_Start_IT(&htim1, TIM_CHANNEL_1);
-	   HAL_TIM_IC_Start_IT(&htim1, TIM_CHANNEL_2);
-	   HAL_TIM_IC_Start_IT(&htim1, TIM_CHANNEL_3);
-	   HAL_TIM_IC_Start_IT(&htim1, TIM_CHANNEL_4);
+	//End
 };
 
 void stabilize_drone_mode(void)
 {
-	motor_value_control();
+	// Receiver value is control.
+	receiver_motor_value();
+
+	//Motor speed, roll, pitch, yaw value.
 	stabilize_mode.motor_speed[0] = 1000 + rec_throttle + roll_right - roll_left + pitch_back - pitch_forward + yaw_right - yaw_left;
 	stabilize_mode.motor_speed[1] = 1000 + rec_throttle + roll_right - roll_left - pitch_back + pitch_forward + yaw_left - yaw_right;
 	stabilize_mode.motor_speed[2] = 1000 + rec_throttle + roll_left - roll_right - pitch_back + pitch_forward + yaw_right - yaw_left;
 	stabilize_mode.motor_speed[3] = 1000 + rec_throttle + roll_left - roll_right + pitch_back - pitch_forward + yaw_left - yaw_right;
 
-
+	// Motor speed roll, pitch, yaw stopper 0 - 2000.
 	if(stabilize_mode.motor_speed[0] >=2000 ) stabilize_mode.motor_speed[0] = 2000;
 	if(stabilize_mode.motor_speed[1] >=2000 ) stabilize_mode.motor_speed[1] = 2000;
 	if(stabilize_mode.motor_speed[2] >=2000 ) stabilize_mode.motor_speed[2] = 2000;
@@ -753,29 +656,111 @@ void stabilize_drone_mode(void)
 	if(stabilize_mode.motor_speed[2] <=1000 ) stabilize_mode.motor_speed[2] = 1000;
 	if(stabilize_mode.motor_speed[3] <=1000 ) stabilize_mode.motor_speed[3] = 1000;
 
+	// Motor value to pwm compare set.
 	stabilize_motor_output();
+   // End
+};
 
+void pid_rol_pitch_value(float measured_roll, float measured_pitch) {
+    // Roll PID calculate
+
+    error_roll = desired_roll - measured_roll;
+    integral_roll += error_roll;
+
+     pid_roll_value = kp * error_roll + ki * integral_roll + kd * (error_roll - last_error_roll);
+     pid_roll_value /= 800;
+
+    last_error_roll = error_roll;
+
+    // Pitch PID calculate
+    error_pitch = desired_pitch - measured_pitch;
+    integral_pitch += error_pitch;
+
+    pid_pitch_value = kp * error_pitch + ki * integral_pitch + kd * (error_pitch - last_error_pitch);
+    pid_pitch_value /= 800;
+    last_error_pitch = error_pitch;
+
+};
+
+
+void loiter_drone_mode(void)
+{
+	receiver_motor_value();									/* Receiver value is control 	*/
+
+	acces_measure();										/* Roll and pitch angle measure */
+
+	pid_rol_pitch_value(measured_roll, measured_pitch);		/* Roll and pitch  pid control */
+
+	loiter_mode.motor_speed[0] = 1000 + rec_throttle + roll_right - roll_left + pitch_back - pitch_forward + yaw_right - yaw_left;
+	loiter_mode.motor_speed[1] = 1000 + rec_throttle + roll_right - roll_left - pitch_back + pitch_forward + yaw_left - yaw_right;
+	loiter_mode.motor_speed[2] = 1000 + rec_throttle + roll_left - roll_right - pitch_back + pitch_forward + yaw_right - yaw_left;
+	loiter_mode.motor_speed[3] = 1000 + rec_throttle + roll_left - roll_right + pitch_back - pitch_forward + yaw_left - yaw_right;
+
+	// Motor speed roll, pitch, yaw stopper 0 - 2000.
+	if(loiter_mode.motor_speed[0] >=2000 ) loiter_mode.motor_speed[0] = 2000;
+	if(loiter_mode.motor_speed[1] >=2000 ) loiter_mode.motor_speed[1] = 2000;
+	if(loiter_mode.motor_speed[2] >=2000 ) loiter_mode.motor_speed[2] = 2000;
+	if(loiter_mode.motor_speed[3] >=2000 ) loiter_mode.motor_speed[3] = 2000;
+
+	if(loiter_mode.motor_speed[0] <=1000 ) loiter_mode.motor_speed[0] = 1000;
+	if(loiter_mode.motor_speed[1] <=1000 ) loiter_mode.motor_speed[1] = 1000;
+	if(loiter_mode.motor_speed[2] <=1000 ) loiter_mode.motor_speed[2] = 1000;
+	if(loiter_mode.motor_speed[3] <=1000 ) loiter_mode.motor_speed[3] = 1000;
+
+
+};
+
+uint16_t degree_change_percentage(uint16_t In, uint16_t Inmin, uint16_t Inmax, uint16_t Outmin, uint16_t Outmax)
+{
+	return (In- Inmin) * (Outmax- Outmin) / (Inmax -Inmin) + Outmin;
+	//End
+};
+
+void tim_start(void)
+{
+	   HAL_TIM_IC_Start_IT(&htim1, TIM_CHANNEL_1);
+	   HAL_TIM_IC_Start_IT(&htim1, TIM_CHANNEL_2);
+	   HAL_TIM_IC_Start_IT(&htim1, TIM_CHANNEL_3);
+	   HAL_TIM_IC_Start_IT(&htim1, TIM_CHANNEL_4);
+	   // End
 };
 
 void stabilize_motor_output(void)
 {
-
-
-
 	__HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_1,stabilize_mode.motor_speed[0]);
 	__HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_2,stabilize_mode.motor_speed[1]);
 	__HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_3,stabilize_mode.motor_speed[2]);
 	__HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_4,stabilize_mode.motor_speed[3]);
+	// End
 };
 
-uint16_t receiver_value_change(uint16_t channel, uint16_t min_value, uint16_t max_value, uint16_t min_per_value, uint16_t max_per_value)
+void loiter_motor_output(void)
 {
+	__HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_1,loiter_mode.motor_speed[0]);
+	__HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_2,loiter_mode.motor_speed[1]);
+	__HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_3,loiter_mode.motor_speed[2]);
+	__HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_4,loiter_mode.motor_speed[3]);
+	// End
+};
 
-	return degree_change_percentage(channel, min_value, max_value, min_per_value, max_per_value);
+void acces_measure(void)
+{
+	if(drdyFlag == 1)
+	{
 
+		drdyFlag = 0;
+		X = LIS3DSH_GetDataScaled();
+		Y = LIS3DSH_GetDataScaledY();
+		Z = LIS3DSH_GetDataScaledZ();
+
+		measured_roll = (int)((((atan2((double)(-X.x) , sqrt((double)Y.y *(double) Y.y +(double) Z.z *(double) Z.z)) * 57.3)+1.5))* -1);
+	}
+		measured_pitch =(int)((atan2(Y.y, Z.z) * 180 / 3.14)+1.2);
 }
 
-void motor_value_control(void)
+
+
+void receiver_motor_value(void)
 {
 	roll_right = degree_change_percentage(rec_roll, 500, 1000, 0, 500);
 	if(roll_right >=1050) roll_right = 0;
@@ -789,8 +774,118 @@ void motor_value_control(void)
 	if(pitch_forward >= 1050) pitch_forward = 0;
 	pitch_back = degree_change_percentage(rec_pitch,500 , 1000, 0, 500);
 	if(pitch_back >= 1050) pitch_back = 0;
-}
+	// End
+};
 
+void HAL_TIM_IC_CaptureCallback(TIM_HandleTypeDef *htim)
+{
+	if(htim->Instance == TIM1)
+	{
+		switch(htim->Channel)
+		{
+		case HAL_TIM_ACTIVE_CHANNEL_1:
+			if((TIM1->CCER & TIM_CCER_CC1P)==0)
+			{
+				ch1_rising = TIM1->CCR1;
+				TIM1->CCER |= TIM_CCER_CC1P;
+			}
+
+			else
+			{
+				ch1_falling = TIM1->CCR1;
+				pre_ch1 = ch1_falling - ch1_rising;
+				//if(pre_ch1 < 0)pre_ch1 += 0xFFFF;
+				pre_ch1 = degree_change_percentage(pre_ch1, 2140, 3862, 0,1000);
+				if(pre_ch1 <= 1000 && pre_ch1 >= 0)rec_roll=pre_ch1;
+				TIM1->CCER &= ~TIM_CCER_CC1P;
+
+				/*
+				 * ch1_rising 65000
+				 * ch1 falling 570
+				 * pre_ch1 = pre_ch1 falling - pre_ch1_rising = 570 - 65000 = -64430
+				 * pre_ch1 +=0xFFFF(65536) --> 1106
+				 */
+			}
+			break;
+		case HAL_TIM_ACTIVE_CHANNEL_2:
+			if((TIM1->CCER & TIM_CCER_CC2P)==0)
+			{
+				ch2_rising = TIM1->CCR2;
+				TIM1->CCER |= TIM_CCER_CC2P;
+			}
+			else
+			{
+				ch2_falling = TIM1->CCR2;
+				pre_ch2 = ch2_falling - ch2_rising;
+				if(pre_ch2 < 0)pre_ch2 += 0xFFFF;
+				pre_ch2 = degree_change_percentage(pre_ch2, 2140, 3862, 0, 1000);
+				if(pre_ch2 <= 1000 && pre_ch2 >= 0)rec_pitch=pre_ch2;
+				TIM1->CCER &= ~TIM_CCER_CC2P;
+			}
+			break;
+		case HAL_TIM_ACTIVE_CHANNEL_3:
+			if((TIM1->CCER & TIM_CCER_CC3P)==0)
+			{
+				ch3_rising = TIM1->CCR3;
+				TIM1->CCER |= TIM_CCER_CC3P;
+			}
+			else
+			{
+				ch3_falling = TIM1->CCR3;
+				pre_ch3 = ch3_falling - ch3_rising;
+				if(pre_ch3 < 0)pre_ch3 += 0xFFFF;
+				pre_ch3 = degree_change_percentage(pre_ch3, 2140, 3862, 0, 1000);
+				if(pre_ch3 <= 1000 && pre_ch3 >= 0)rec_throttle=pre_ch3;
+				TIM1->CCER &= ~TIM_CCER_CC3P;
+			}
+			break;
+		case HAL_TIM_ACTIVE_CHANNEL_4:
+			if((TIM1->CCER & TIM_CCER_CC4P)==0)
+			{
+				ch4_rising = TIM1->CCR4;
+				TIM1->CCER |= TIM_CCER_CC4P;
+			}
+			else
+			{
+				ch4_falling = TIM1->CCR4;
+				pre_ch4 = ch4_falling - ch4_rising;
+				if(pre_ch4 < 0)pre_ch4 += 0xFFFF;
+				pre_ch4 = degree_change_percentage(pre_ch4, 2140, 3862, 0, 1000);
+				if(pre_ch4 <= 1000 && pre_ch4 >= 0)rec_yaw=pre_ch4;
+				TIM1->CCER &= ~TIM_CCER_CC4P;
+			}
+			break;
+		default:
+			break;
+		}
+	}
+
+	if(htim->Instance == TIM3) {
+		if((TIM3->CCER & TIM_CCER_CC1P)==0)
+					{
+						ch1_rising = TIM3->CCR1;
+						TIM3->CCER |= TIM_CCER_CC1P;
+					}
+
+					else
+					{
+						ch1_falling = TIM3->CCR1;
+						pre_ch1 = ch1_falling - ch1_rising;
+						//if(pre_ch1 < 0)pre_ch1 += 0xFFFF;
+						pre_ch1 = degree_change_percentage(pre_ch1, 2140, 3862, 0,1000);
+						if(pre_ch1 <= 1000 && pre_ch1 >= 0)rec_roll=pre_ch1;
+						TIM3->CCER &= ~TIM_CCER_CC1P;
+
+						/*
+						 * ch1_rising 65000
+						 * ch1 falling 570
+						 * pre_ch1 = pre_ch1 falling - pre_ch1_rising = 570 - 65000 = -64430
+						 * pre_ch1 +=0xFFFF(65536) --> 1106
+						 */
+					}
+
+	}
+};
 /* USER CODE END 4 */
 
 /**
@@ -805,7 +900,7 @@ void Error_Handler(void)
   {
   }
   /* USER CODE END Error_Handler_Debug */
-};
+}
 
 #ifdef  USE_FULL_ASSERT
 /**
