@@ -70,7 +70,7 @@ char tx_buf[64];
 float pid_roll_value = 0;
 float pid_pitch_value = 0;
 
-volatile uint32_t ch1_rising = 0, ch2_rising = 0, ch3_rising = 0, ch4_rising = 0;
+volatile uint32_t ch1_rising = 0, ch2_rising = 0, ch3_rising = 0, ch4_rising = 0, ch5_rising = 0, ch5_falling = 0, pre_ch5 = 0, mode_status = 0;
 volatile uint32_t ch1_falling = 0, ch2_falling = 0, ch3_falling = 0, ch4_falling = 0;
 volatile uint32_t pre_ch1 = 0, ch1 = 0, pre_ch2 = 0, ch2 = 0, pre_ch3 = 0, ch3 = 0, pre_ch4 = 0, ch4 = 0;
 
@@ -212,9 +212,10 @@ int main(void)
 
 	  tim_start(); 											/* Timer start htim1, input capture */
 
-	  stabilize_drone_mode();								/* Drone is stabilize mode active */
+	 stabilize_drone_mode();								/* Drone is stabilize mode active */
 
-	  loiter_drone_mode();									/* Drone is loiter mode active */
+	 acces_measure();
+	  //loiter_drone_mode();									/* Drone is loiter mode active */
 
 
   }
@@ -641,9 +642,14 @@ void stabilize_drone_mode(void)
 
 	//Motor speed, roll, pitch, yaw value.
 	stabilize_mode.motor_speed[0] = 1000 + rec_throttle + roll_right - roll_left + pitch_back - pitch_forward + yaw_right - yaw_left;
-	stabilize_mode.motor_speed[1] = 1000 + rec_throttle + roll_right - roll_left - pitch_back + pitch_forward + yaw_left - yaw_right;
-	stabilize_mode.motor_speed[2] = 1000 + rec_throttle + roll_left - roll_right - pitch_back + pitch_forward + yaw_right - yaw_left;
-	stabilize_mode.motor_speed[3] = 1000 + rec_throttle + roll_left - roll_right + pitch_back - pitch_forward + yaw_left - yaw_right;
+	stabilize_mode.motor_speed[1] = 1000 + rec_throttle + roll_right - roll_left - pitch_back + pitch_forward - yaw_right + yaw_left;
+	stabilize_mode.motor_speed[2] = 1000 + rec_throttle + roll_left - roll_right + pitch_back - pitch_forward - yaw_right + yaw_left;
+	stabilize_mode.motor_speed[3] = 1000 + rec_throttle + roll_left - roll_right - pitch_back + pitch_forward + yaw_right - yaw_left ;
+
+//	stabilize_mode.motor_speed[0] = 1000 + rec_throttle + roll_right - roll_left + pitch_back - pitch_forward + yaw_right - yaw_left;
+//	stabilize_mode.motor_speed[1] = 1000 + rec_throttle + roll_right - roll_left - pitch_back + pitch_forward + yaw_left - yaw_right;
+//	stabilize_mode.motor_speed[2] = 1000 + rec_throttle + roll_left - roll_right - pitch_back + pitch_forward + yaw_right - yaw_left;
+//	stabilize_mode.motor_speed[3] = 1000 + rec_throttle + roll_left - roll_right + pitch_back - pitch_forward + yaw_left - yaw_right;
 
 	// Motor speed roll, pitch, yaw stopper 0 - 2000.
 	if(stabilize_mode.motor_speed[0] >=2000 ) stabilize_mode.motor_speed[0] = 2000;
@@ -762,17 +768,17 @@ void acces_measure(void)
 
 void receiver_motor_value(void)
 {
-	roll_right = degree_change_percentage(rec_roll, 500, 1000, 0, 500);
+	roll_right = degree_change_percentage(rec_roll, 500, 1000, 0, 50);
 	if(roll_right >=1050) roll_right = 0;
-	roll_left = degree_change_percentage(rec_roll, 0, 500, 500, 0);
+	roll_left = degree_change_percentage(rec_roll, 0, 500, 50, 0);
 	if(roll_left >=1050) roll_left = 0;
-	yaw_right = degree_change_percentage(rec_yaw, 500, 1000, 0, 500);
+	yaw_right = degree_change_percentage(rec_yaw, 500, 1000, 0, 50);
 	if(yaw_right >= 1050) yaw_right = 0;
-	yaw_left = degree_change_percentage(rec_yaw, 0, 500, 500, 0);
+	yaw_left = degree_change_percentage(rec_yaw, 0, 500, 50, 0);
 	if(yaw_left >= 1050) yaw_left = 0;
-	pitch_forward = degree_change_percentage(rec_pitch,0 , 500, 500, 0);
+	pitch_forward = degree_change_percentage(rec_pitch,0 , 500, 50, 0);
 	if(pitch_forward >= 1050) pitch_forward = 0;
-	pitch_back = degree_change_percentage(rec_pitch,500 , 1000, 0, 500);
+	pitch_back = degree_change_percentage(rec_pitch,500 , 1000, 0, 50);
 	if(pitch_back >= 1050) pitch_back = 0;
 	// End
 };
@@ -863,17 +869,17 @@ void HAL_TIM_IC_CaptureCallback(TIM_HandleTypeDef *htim)
 	if(htim->Instance == TIM3) {
 		if((TIM3->CCER & TIM_CCER_CC1P)==0)
 					{
-						ch1_rising = TIM3->CCR1;
+						ch5_rising = TIM3->CCR1;
 						TIM3->CCER |= TIM_CCER_CC1P;
 					}
 
 					else
 					{
-						ch1_falling = TIM3->CCR1;
+						ch5_falling = TIM3->CCR1;
 						pre_ch1 = ch1_falling - ch1_rising;
 						//if(pre_ch1 < 0)pre_ch1 += 0xFFFF;
-						pre_ch1 = degree_change_percentage(pre_ch1, 2140, 3862, 0,1000);
-						if(pre_ch1 <= 1000 && pre_ch1 >= 0)rec_roll=pre_ch1;
+						pre_ch5 = degree_change_percentage(pre_ch5, 2140, 3862, 0,1000);
+						if(pre_ch5 <= 1000 && pre_ch5 >= 0)mode_status=pre_ch5;
 						TIM3->CCER &= ~TIM_CCER_CC1P;
 
 						/*
